@@ -1,0 +1,37 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python / Jupyter
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments
+.venv/
+venv/
+env/
+
+# OS/editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Large/generated binaries
+*.pkl
+*.joblib
+*.pkg
+
+# Raw batch outputs from LLM or SHAP runs
+batch_*.xlsx
+xgb_shap_batch_*.xlsx
+errors.jsonl
+
+# Optional local scratch outputs
+Code/Result/
+Archive_Code/
+Code/Archive/

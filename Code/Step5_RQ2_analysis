@@ -1,0 +1,404 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Step 5: RQ2 Metric Analysis\n",
+    "\n",
+    "This notebook aggregates the RQ2 evaluation metrics from zero-shot and few-shot experiments for Logistic Regression and XGBoost. It is analysis-only: earlier notebooks generate samples, LLM outputs, summaries, and metric files."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from pathlib import Path\n",
+    "import pandas as pd\n",
+    "import numpy as np"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 1. Project Paths"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Works both in Colab and in the local project folder.\n",
+    "COLAB_PROJECT_ROOT = Path('/content/drive/MyDrive/LLM_ClubLending')\n",
+    "LOCAL_PROJECT_ROOT = Path.cwd()\n",
+    "\n",
+    "BASE_DIR = COLAB_PROJECT_ROOT if COLAB_PROJECT_ROOT.exists() else LOCAL_PROJECT_ROOT\n",
+    "RESULT_ROOT = BASE_DIR / 'Result' / 'LendingClub' / 'LLM'\n",
+    "\n",
+    "print(f'BASE_DIR: {BASE_DIR}')\n",
+    "print(f'RESULT_ROOT: {RESULT_ROOT}')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 2. Expected RQ2 Result Files"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "LLM_MODELS = {\n",
+    "    'Claude': 'claude-sonnet-4-5-20250929',\n",
+    "    'GPT-4 Turbo': 'gpt-4-turbo',\n",
+    "    'Gemini 2.0 Flash': 'gemini/gemini-2.0-flash',\n",
+    "}\n",
+    "\n",
+    "EXPERIMENTS = [\n",
+    "    {\n",
+    "        'model_family': 'Logistic',\n",
+    "        'prompt_type': 'Zero-shot',\n",
+    "        'result_subdir': 'RQ2_logistic',\n",
+    "    },\n",
+    "    {\n",
+    "        'model_family': 'Logistic',\n",
+    "        'prompt_type': 'Few-shot',\n",
+    "        'result_subdir': 'RQ2_logistic_FewShot',\n",
+    "    },\n",
+    "    {\n",
+    "        'model_family': 'XGBoost',\n",
+    "        'prompt_type': 'Zero-shot',\n",
+    "        'result_subdir': 'RQ2',\n",
+    "    },\n",
+    "    {\n",
+    "        'model_family': 'XGBoost',\n",
+    "        'prompt_type': 'Few-shot',\n",
+    "        'result_subdir': 'RQ2_XgBoost_FewShot',\n",
+    "    },\n",
+    "]\n",
+    "\n",
+    "\n",
+    "def model_output_dir(model_name):\n",
+    "    \"\"\"Match the folder naming convention used by the cleaned Step 4 notebooks.\"\"\"\n",
+    "    return model_name.replace('/', '__')\n",
+    "\n",
+    "\n",
+    "def expected_metric_files(result_root=RESULT_ROOT):\n",
+    "    rows = []\n",
+    "    for exp in EXPERIMENTS:\n",
+    "        for llm_label, model_name in LLM_MODELS.items():\n",
+    "            metric_path = (\n",
+    "                result_root\n",
+    "                / exp['result_subdir']\n",
+    "                / model_output_dir(model_name)\n",
+    "                / 'metric.xlsx'\n",
+    "            )\n",
+    "            rows.append({\n",
+    "                **exp,\n",
+    "                'llm': llm_label,\n",
+    "                'llm_model_name': model_name,\n",
+    "                'metric_path': metric_path,\n",
+    "                'exists': metric_path.exists(),\n",
+    "            })\n",
+    "    return pd.DataFrame(rows)\n",
+    "\n",
+    "metric_file_index = expected_metric_files()\n",
+    "metric_file_index"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 3. Load And Combine Metrics"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def read_metric_file(row):\n",
+    "    metric_path = row['metric_path']\n",
+    "    metric_df = pd.read_excel(metric_path)\n",
+    "\n",
+    "    # Older metric files may include an unnamed index column from to_excel(index=True).\n",
+    "    unnamed_cols = [col for col in metric_df.columns if str(col).startswith('Unnamed')]\n",
+    "    if unnamed_cols:\n",
+    "        metric_df = metric_df.drop(columns=unnamed_cols)\n",
+    "\n",
+    "    for col in ['model_family', 'prompt_type', 'result_subdir', 'llm', 'llm_model_name']:\n",
+    "        metric_df[col] = row[col]\n",
+    "    metric_df['metric_path'] = str(metric_path)\n",
+    "    return metric_df\n",
+    "\n",
+    "\n",
+    "def load_all_metrics(metric_files):\n",
+    "    frames = []\n",
+    "    missing = []\n",
+    "\n",
+    "    for _, row in metric_files.iterrows():\n",
+    "        if not row['exists']:\n",
+    "            missing.append(row.to_dict())\n",
+    "            continue\n",
+    "        try:\n",
+    "            frames.append(read_metric_file(row))\n",
+    "        except Exception as exc:\n",
+    "            missing_row = row.to_dict()\n",
+    "            missing_row['error'] = repr(exc)\n",
+    "            missing.append(missing_row)\n",
+    "\n",
+    "    combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()\n",
+    "    missing_df = pd.DataFrame(missing)\n",
+    "    return combined, missing_df\n",
+    "\n",
+    "all_metrics, missing_metrics = load_all_metrics(metric_file_index)\n",
+    "\n",
+    "loaded_file_count = metric_file_index['exists'].sum()\n",
+    "print(f'Loaded metric files: {loaded_file_count} / {len(metric_file_index)}')\n",
+    "print(f'Combined rows: {len(all_metrics)}')\n",
+    "\n",
+    "if not missing_metrics.empty:\n",
+    "    display(missing_metrics[['model_family', 'prompt_type', 'llm', 'metric_path']])\n",
+    "\n",
+    "all_metrics.head()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 4. Basic Quality Checks"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "if all_metrics.empty:\n",
+    "    print('No metric files were found. Run the cleaned Step 4 RQ2 notebooks first, then rerun this notebook.')\n",
+    "else:\n",
+    "    expected_id_cols = ['Rowindex', 'model_family', 'prompt_type', 'llm']\n",
+    "    present_id_cols = [col for col in expected_id_cols if col in all_metrics.columns]\n",
+    "\n",
+    "    print('Columns:')\n",
+    "    display(pd.DataFrame({'column': all_metrics.columns}))\n",
+    "\n",
+    "    if 'Rowindex' in all_metrics.columns:\n",
+    "        sample_counts = (\n",
+    "            all_metrics\n",
+    "            .groupby(['model_family', 'prompt_type', 'llm'])['Rowindex']\n",
+    "            .agg(rows='size', unique_samples='nunique')\n",
+    "            .reset_index()\n",
+    "            .sort_values(['model_family', 'prompt_type', 'llm'])\n",
+    "        )\n",
+    "        display(sample_counts)\n",
+    "    else:\n",
+    "        print('Warning: Rowindex column is missing, so sample alignment cannot be checked.')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 5. Metric Summary"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "METADATA_COLUMNS = {\n",
+    "    'Rowindex', 'model_family', 'prompt_type', 'result_subdir',\n",
+    "    'llm', 'llm_model_name', 'metric_path'\n",
+    "}\n",
+    "\n",
+    "\n",
+    "def metric_columns(df):\n",
+    "    numeric_cols = df.select_dtypes(include='number').columns.tolist()\n",
+    "    return [col for col in numeric_cols if col not in METADATA_COLUMNS]\n",
+    "\n",
+    "if all_metrics.empty:\n",
+    "    metric_summary = pd.DataFrame()\n",
+    "    print('No metrics available to summarize.')\n",
+    "else:\n",
+    "    metric_cols = metric_columns(all_metrics)\n",
+    "    print(f'Metric columns: {metric_cols}')\n",
+    "\n",
+    "    metric_summary = (\n",
+    "        all_metrics\n",
+    "        .groupby(['model_family', 'prompt_type', 'llm'])[metric_cols]\n",
+    "        .agg(['count', 'mean', 'std', 'median', 'min', 'max'])\n",
+    "        .round(4)\n",
+    "    )\n",
+    "    display(metric_summary)\n",
+    "\n",
+    "metric_summary"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 6. Zero-Shot Vs Few-Shot Comparison"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "if all_metrics.empty or 'Rowindex' not in all_metrics.columns:\n",
+    "    paired_prompt_delta = pd.DataFrame()\n",
+    "    print('Paired comparison requires loaded metrics with Rowindex.')\n",
+    "else:\n",
+    "    metric_cols = metric_columns(all_metrics)\n",
+    "    key_cols = ['model_family', 'llm', 'Rowindex']\n",
+    "\n",
+    "    zero = all_metrics[all_metrics['prompt_type'] == 'Zero-shot'][key_cols + metric_cols]\n",
+    "    few = all_metrics[all_metrics['prompt_type'] == 'Few-shot'][key_cols + metric_cols]\n",
+    "\n",
+    "    paired = zero.merge(\n",
+    "        few,\n",
+    "        on=key_cols,\n",
+    "        how='inner',\n",
+    "        suffixes=('_zero', '_fewshot')\n",
+    "    )\n",
+    "\n",
+    "    print(f'Paired zero-shot/few-shot samples: {len(paired)}')\n",
+    "\n",
+    "    delta_frames = []\n",
+    "    for metric in metric_cols:\n",
+    "        delta_col = f'{metric}_delta_fewshot_minus_zero'\n",
+    "        paired[delta_col] = paired[f'{metric}_fewshot'] - paired[f'{metric}_zero']\n",
+    "        delta_frames.append(delta_col)\n",
+    "\n",
+    "    paired_prompt_delta = (\n",
+    "        paired\n",
+    "        .groupby(['model_family', 'llm'])[delta_frames]\n",
+    "        .agg(['count', 'mean', 'std', 'median'])\n",
+    "        .round(4)\n",
+    "    )\n",
+    "    display(paired_prompt_delta)\n",
+    "\n",
+    "paired_prompt_delta"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 7. Logistic Vs XGBoost Comparison"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "if all_metrics.empty or 'Rowindex' not in all_metrics.columns:\n",
+    "    paired_model_delta = pd.DataFrame()\n",
+    "    print('Paired model comparison requires loaded metrics with Rowindex.')\n",
+    "else:\n",
+    "    metric_cols = metric_columns(all_metrics)\n",
+    "    key_cols = ['prompt_type', 'llm', 'Rowindex']\n",
+    "\n",
+    "    logistic = all_metrics[all_metrics['model_family'] == 'Logistic'][key_cols + metric_cols]\n",
+    "    xgboost = all_metrics[all_metrics['model_family'] == 'XGBoost'][key_cols + metric_cols]\n",
+    "\n",
+    "    paired = logistic.merge(\n",
+    "        xgboost,\n",
+    "        on=key_cols,\n",
+    "        how='inner',\n",
+    "        suffixes=('_logistic', '_xgboost')\n",
+    "    )\n",
+    "\n",
+    "    print(f'Paired Logistic/XGBoost samples: {len(paired)}')\n",
+    "\n",
+    "    delta_frames = []\n",
+    "    for metric in metric_cols:\n",
+    "        delta_col = f'{metric}_delta_xgboost_minus_logistic'\n",
+    "        paired[delta_col] = paired[f'{metric}_xgboost'] - paired[f'{metric}_logistic']\n",
+    "        delta_frames.append(delta_col)\n",
+    "\n",
+    "    paired_model_delta = (\n",
+    "        paired\n",
+    "        .groupby(['prompt_type', 'llm'])[delta_frames]\n",
+    "        .agg(['count', 'mean', 'std', 'median'])\n",
+    "        .round(4)\n",
+    "    )\n",
+    "    display(paired_model_delta)\n",
+    "\n",
+    "paired_model_delta"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 8. Optional Export"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "ANALYSIS_OUTPUT_DIR = RESULT_ROOT / 'RQ2_analysis'\n",
+    "\n",
+    "if all_metrics.empty:\n",
+    "    print('No analysis files exported because no metric files were loaded.')\n",
+    "else:\n",
+    "    ANALYSIS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n",
+    "    all_metrics.to_excel(ANALYSIS_OUTPUT_DIR / 'rq2_all_metrics_combined.xlsx', index=False)\n",
+    "    if not metric_summary.empty:\n",
+    "        metric_summary.to_excel(ANALYSIS_OUTPUT_DIR / 'rq2_metric_summary.xlsx')\n",
+    "    if not paired_prompt_delta.empty:\n",
+    "        paired_prompt_delta.to_excel(ANALYSIS_OUTPUT_DIR / 'rq2_zero_vs_fewshot_paired_delta.xlsx')\n",
+    "    if not paired_model_delta.empty:\n",
+    "        paired_model_delta.to_excel(ANALYSIS_OUTPUT_DIR / 'rq2_logistic_vs_xgboost_paired_delta.xlsx')\n",
+    "    print(f'Exported analysis files to: {ANALYSIS_OUTPUT_DIR}')"
+   ]
+  }
+ ],
+ "metadata": {
+  "colab": {
+   "collapsed_sections": [
+    "j-nsgzrq9wO5",
+    "2mh8f4nZ7LCU",
+    "CAMyGilWmJ3v",
+    "37K5Zw5ZmRwa",
+    "YokbE498VJ15",
+    "ptsSTvn7DeXK",
+    "DjDlTpIqbIc4"
+   ],
+   "provenance": []
+  },
+  "kernelspec": {
+   "display_name": "Python 3",
+   "name": "python3"
+  },
+  "language_info": {
+   "name": "python"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 0
+}

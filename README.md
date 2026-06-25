@@ -2,6 +2,8 @@
 
 This repository contains the notebooks and reproducibility artifacts for evaluating whether large language models preserve model-provided feature-importance rankings in instance-level explanations.
 
+You can find the preprint manuscript at https://arxiv.org/abs/2602.18895
+
 The project studies two base predictive models, logistic regression and XGBoost, and compares LLM-generated rankings against model-derived reference rankings from coefficient/SHAP-style contribution tables.
 
 ## Research Questions
